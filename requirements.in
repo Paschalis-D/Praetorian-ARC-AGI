@@ -1,3 +1,4 @@
 torch
 numpy < 2.0
 pandas
+torchvision

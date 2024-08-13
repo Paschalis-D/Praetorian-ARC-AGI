@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 class Convolutional(nn.Module):
     def __init__(self, in_channels) -> None:
         super(Convolutional, self).__init__()
@@ -118,7 +119,7 @@ class Siamese(nn.Module):
 
 
 class ARC_model(nn.Module):
-    def __init__(self, in_channels, adaptive_in_features, adaptive_out_features, siamese_input_size, threshold=0.5) -> None:
+    def __init__(self, in_channels, adaptive_in_features, adaptive_out_features, siamese_input_size, threshold=0.8) -> None:
         super().__init__()
         self.convolutional = Convolutional(in_channels)
         self.adaptive = Adaptive(adaptive_in_features, adaptive_out_features)

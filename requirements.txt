@@ -20,8 +20,11 @@ numpy==1.26.4
     # via
     #   -r requirements.in
     #   pandas
+    #   torchvision
 pandas==2.2.2
     # via -r requirements.in
+pillow==10.4.0
+    # via torchvision
 python-dateutil==2.9.0.post0
     # via pandas
 pytz==2024.1
@@ -31,6 +34,10 @@ six==1.16.0
 sympy==1.13.1
     # via torch
 torch==2.4.0
+    # via
+    #   -r requirements.in
+    #   torchvision
+torchvision==0.19.0
     # via -r requirements.in
 typing-extensions==4.12.2
     # via torch
