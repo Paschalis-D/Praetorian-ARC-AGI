@@ -5,18 +5,18 @@ import torch.nn.functional as F
 from torch import nn #, einsum, rearrange
 import numpy as np
 
-from model.set_diffusion.gaussian_diffusion import GaussianDiffusion
-from model.set_diffusion.nn import SiLU, timestep_embedding
-from model.set_diffusion.script_util import (
+from FSDM.model.set_diffusion.gaussian_diffusion import GaussianDiffusion
+from FSDM.model.set_diffusion.nn import SiLU, timestep_embedding
+from FSDM.model.set_diffusion.script_util import (
     add_dict_to_argparser,
     args_to_dict,
     create_model_and_diffusion,
     model_and_diffusion_defaults,
 )
-from model.set_diffusion.unet import EncoderUNetModel, UNetModel
-from model.vit import ViT
-from model.vit_set import sViT
-from model.set_diffusion.nn import mean_flat
+from FSDM.model.set_diffusion.unet import EncoderUNetModel, UNetModel
+from FSDM.model.vit import ViT
+from FSDM.model.vit_set import sViT
+from FSDM.model.set_diffusion.nn import mean_flat
 
 
 class DDPM(nn.Module):

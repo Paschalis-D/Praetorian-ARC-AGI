@@ -47,8 +47,8 @@ def model_and_diffusion_defaults():
     Defaults for image training.
     """
     res = dict(
-        image_size=32,
-        in_channels=3,
+        image_size=30,
+        in_channels=1,
         num_channels=64,
         num_res_blocks=2,
         num_heads=4,
@@ -168,7 +168,7 @@ def create_model(
             channel_mult = (1, 1, 2, 3, 4)
         elif image_size == 64:
             channel_mult = (1, 2, 3, 4)
-        elif image_size in [32, 28]:
+        elif image_size in [32, 30, 28]:
             channel_mult = (1, 2, 3, 4)
         else:
             raise ValueError(f"unsupported image size: {image_size}")

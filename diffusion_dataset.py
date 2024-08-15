@@ -5,18 +5,18 @@ import numpy as np
 import torch.nn.functional as F
 
 
-class ARCDataset(Dataset):
-    def __init__(self, json_dir, device, split=None):
+class DiffusionDataset(Dataset):
+    def __init__(self, json_dir, device, task, split=None):
         self.json_dir = json_dir
         self.device = device
         self.split = split  # Can be 'train', 'val', or 'test'
         self.train_examples = []
         self.dataset = pd.read_json(self.json_dir)
-        
-        for task in self.dataset:
-            train_ex = self.dataset[task][1]
-            for example in train_ex:
-                self.train_examples.append(example)
+        self.task = self.dataset.columns[task]
+
+        train_ex = self.dataset[self.task][1]
+        for example in train_ex:
+            self.train_examples.append(example)
                 
     def __len__(self):
         return len(self.train_examples)
@@ -66,15 +66,22 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     try:
-        train_dataset = ARCDataset(json_dir, device, split)
-        train_dataloader = DataLoader(train_dataset, batch_size=32, shuffle=True)
-
+        task = 1
+        train_dataset = DiffusionDataset(json_dir, device, task, split)
+        train_dataloader = DataLoader(train_dataset, batch_size=1, shuffle=True)
+        print(len(train_dataloader))
+        inputs_list=[]
+        labels_list=[]
         for batch in train_dataloader:
             inputs, labels = batch
-            print("Input: ", inputs)
-            print("Label: ", labels)
+            inputs_list.append(inputs)
+            labels_list.append(labels)
+            #print("Input: ", inputs)
+            #print("Label: ", labels)
             print(inputs.shape, labels.shape)
-            break  # Print the first batch shape and exit
+
+        print(len(inputs_list))
+        print(len(labels_list))
 
     except Exception as e:
         print(f"An error occurred: {e}")

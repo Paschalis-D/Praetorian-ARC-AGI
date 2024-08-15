@@ -2,3 +2,8 @@ torch
 numpy < 2.0
 pandas
 torchvision
+matplotlib
+einops
+wandb
+tensorflow
+blobfile

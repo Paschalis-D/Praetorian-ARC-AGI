@@ -1,7 +1,7 @@
-from asyncore import write
 import copy
 import functools
 import os
+import torch
 
 import blobfile as bf
 import torch as th
@@ -271,7 +271,7 @@ class TrainLoop:
         self.val_loader=val_loader
 
         self.model = model
-        self.data = data
+        self.data = iter(data)
         self.batch_size = batch_size
         self.microbatch = batch_size
         self.lr = lr
@@ -332,11 +332,6 @@ class TrainLoop:
             #     find_unused_parameters=False,
             # )
         else:
-            if dist.get_world_size() > 1:
-                logger.warn(
-                    "Distributed training requires CUDA. "
-                    "Gradients will not be synchronized properly!"
-                )
             self.use_ddp = False
             self.ddp_model = self.model
 
@@ -437,28 +432,35 @@ class TrainLoop:
         self.log_step()
 
     def forward_backward(self, batch, cond, thresh=0.3):
+        # Unpack the batch if it's a list
+        input_tensor, label_tensor = batch  # Assuming batch is [input_tensor, label_tensor]
+
+        # Convert to GPU (if available)
+        input_tensor = input_tensor.to("cuda")
+        label_tensor = label_tensor.to("cuda")
+
+        # Use the input tensor as the main tensor for training
+        batch = input_tensor
+
         self.mp_trainer.zero_grad()
         for i in range(0, batch.shape[0], self.microbatch):
-            #micro = batch[i : i + self.microbatch].to("cuda")
+            # Now use the unpacked input tensor for processing
+            micro = batch[i : i + self.microbatch]
 
-            batch = batch.to("cuda")
+            dim = np.prod(micro.shape[2:])
+            bs = micro.shape[0]
+            ns = micro.shape[1]
 
-            dim = np.prod(batch.shape[2:])
-            bs=batch.shape[0]
-            ns=batch.shape[1]
-            # micro_cond = {
-            #     k: v[i : i + self.microbatch].to("cuda")
-            #     for k, v in cond.items()
-            # }
             last_batch = (i + self.microbatch) >= batch.shape[0]
-            t, weights = self.schedule_sampler.sample(bs, batch.device)
-            # repeat t for ns element in each set
-            t = th.repeat_interleave(t, ns, dim=0)
-            weights = th.repeat_interleave(weights, ns, dim=0)
-            
+            t, weights = self.schedule_sampler.sample(bs, micro.device)
+
+            # Repeat t for ns elements in each set
+            t = torch.repeat_interleave(t, ns, dim=0)
+            weights = torch.repeat_interleave(weights, ns, dim=0)
+
             compute_losses = functools.partial(
                 self.model,
-                batch,
+                micro,
                 t,
             )
 
@@ -472,19 +474,14 @@ class TrainLoop:
                 self.schedule_sampler.update_with_local_losses(
                     t, losses["loss"].detach()
                 )
-            # this loss is already in bpd and weights ar 1
             loss = (losses["loss"] * weights)
-            # sum over the sample_size to obtain the per-set loss
             loss = loss.view(bs, ns).sum(-1)
-            # add klc contribution
+
             if "klc" in losses:
-                # per set loss
-                # we risk to overtrain the klc term. Maybe we can train only 10/50% steps?
-                # train klc 50% of the times
                 loss += losses["klc"]
-            # avg over the batch for per-set loss and divide by sample_size for the per-sample loss
+
             loss = loss.mean() / ns
-            
+
             log_loss_dict(
                 self.model.diffusion, t, {k: v * weights for k, v in losses.items() if k not in ["klc"]}
             )
@@ -492,7 +489,7 @@ class TrainLoop:
                 log_loss_dict(
                     self.model.diffusion, t, {"klc": losses["klc"].mean()}, False
                 )
-            
+
             self.mp_trainer.backward(loss)
 
     def _update_ema(self):

@@ -1,6 +1,6 @@
 
-from model.vfsddpm import DDPM
-from model.vfsddpm import VFSDDPM
+from FSDM.model.vfsddpm import DDPM
+from FSDM.model.vfsddpm import VFSDDPM
 
 def select_model(args):
     if args.model == "ddpm":

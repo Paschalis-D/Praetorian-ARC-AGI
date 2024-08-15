@@ -5,6 +5,11 @@ import numpy as np
 df = pd.read_json("D:/ARC/arc-data/arc-agi_training_challenges.json")
 
 for task in df:
+    print(task)
+print(df.head())
+
+
+for task in df:
     # This variable holds only the train row of the dataset
     train_ex = df[task][1]
 

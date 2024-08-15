@@ -68,13 +68,13 @@ def main():
 
 def create_argparser():
     defaults = dict(
-        model='vfsddpm',
+        model='ddpm',
         dataset='cifar100',
-        image_size=32,
+        image_size=30,
         sample_size=5,
-        patch_size=8,
+        patch_size=2,
         hdim=256,
-        in_channels=3,
+        in_channels=1,
         encoder_mode='vit',
         pool='mean', # mean, mean_patch
         context_channels=256,
