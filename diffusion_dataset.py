@@ -61,23 +61,23 @@ class DiffusionDataset(Dataset):
 
 # Example usage: Load and print the first batch of the training dataset
 if __name__ == "__main__":
-    json_dir = "D:/ARC/arc-data/arc-agi_training_challenges.json"
+    json_dir = "D:/Praetorian-ARC-AGI/arc-data/arc-agi_training_challenges.json"
     split = None
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     try:
-        task = 1
+        task = 11
         train_dataset = DiffusionDataset(json_dir, device, task, split)
         train_dataloader = DataLoader(train_dataset, batch_size=1, shuffle=True)
-        print(len(train_dataloader))
+        print(len(train_dataset))
         inputs_list=[]
         labels_list=[]
         for batch in train_dataloader:
             inputs, labels = batch
             inputs_list.append(inputs)
             labels_list.append(labels)
-            #print("Input: ", inputs)
-            #print("Label: ", labels)
+            print("Input: ", inputs)
+            print("Label: ", labels)
             print(inputs.shape, labels.shape)
 
         print(len(inputs_list))
