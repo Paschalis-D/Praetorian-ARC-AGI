@@ -32,8 +32,8 @@ class DiffusionDataset(Dataset):
             label = label / 9.0
 
             # Pad the images to a 30x30 grid
-            input = self.pad_to_30x30(input)
-            label = self.pad_to_30x30(label)
+            input = self.pad_to_32x32(input)
+            label = self.pad_to_32x32(label)
 
             # Move tensors to the specified device
             input = input.to(self.device)
@@ -45,12 +45,12 @@ class DiffusionDataset(Dataset):
             print(f"An error occurred while processing index {idx}: {e}")
             raise
 
-    def pad_to_30x30(self, tensor):
+    def pad_to_32x32(self, tensor):
         current_height = tensor.size(1)
         current_width = tensor.size(2)
 
-        pad_height = 30 - current_height
-        pad_width = 30 - current_width
+        pad_height = 32 - current_height
+        pad_width = 32 - current_width
 
         padding = (pad_width // 2, pad_width - pad_width // 2, pad_height // 2, pad_height - pad_height // 2)
 

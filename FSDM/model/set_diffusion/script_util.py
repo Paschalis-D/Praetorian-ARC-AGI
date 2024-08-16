@@ -47,7 +47,7 @@ def model_and_diffusion_defaults():
     Defaults for image training.
     """
     res = dict(
-        image_size=30,
+        image_size=32,
         in_channels=1,
         num_channels=64,
         num_res_blocks=2,

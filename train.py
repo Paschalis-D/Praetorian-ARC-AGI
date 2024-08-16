@@ -31,7 +31,7 @@ def create_argparser(**kwargs):
     defaults = dict(
         model='ddpm',
         dataset='cifar100',
-        image_size=30,
+        image_size=32,
         patch_size=2,
         hdim=256,
         in_channels=1,
@@ -74,7 +74,7 @@ def create_argparser(**kwargs):
 
 def diffusion_train(dataset, sample_size):
     # Simulate passing command-line arguments
-    args_list = ["--device", "cpu"]
+    args_list = ["--device", "cuda"]
     
     # Use the argument list to parse the arguments
     args = create_argparser().parse_args(args_list)
@@ -137,11 +137,11 @@ def relational_network_train(dataset):
 
 
 if __name__ == '__main__':
-    json_dir = "D:/ARC/arc-data/arc-agi_training_challenges.json"
+    json_dir = "D:\Praetorian-ARC-AGI/arc-data/arc-agi_training_challenges.json"
     device = torch.device("cuda" if torch.cuda.is_available else "cpu")
-    task = 1
+    task = 11
 
-    dataset = DiffusionDataset(json_dir=json_dir, device="cpu", task=task)
+    dataset = DiffusionDataset(json_dir=json_dir, device="cuda", task=task)
     sample_size = len(dataset)  # This should be returned by the Dataset
 
     diffusion_train(dataset, sample_size)
