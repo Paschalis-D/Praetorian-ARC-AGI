@@ -3,20 +3,27 @@ from torch.utils.data import Dataset, DataLoader
 import pandas as pd
 import numpy as np
 import torch.nn.functional as F
+import os
 
+# TODO: Make json files readable from pandas.
 
 class DiffusionDataset(Dataset):
-    def __init__(self, json_dir, device, task, split=None):
-        self.json_dir = json_dir
+    def __init__(self, data_dir, device):
+        self.data_dir = data_dir
         self.device = device
-        self.split = split  # Can be 'train', 'val', or 'test'
         self.train_examples = []
-        self.dataset = pd.read_json(self.json_dir)
-        self.task = self.dataset.columns[task]
-
-        train_ex = self.dataset[self.task][1]
-        for example in train_ex:
-            self.train_examples.append(example)
+        
+        # Collect all JSON files in the directory
+        self.json_paths = [os.path.join(data_dir, json_file) for json_file in os.listdir(data_dir)]
+        
+        # Load and process each JSON file
+        for json_path in self.json_paths:
+            dataset = pd.read_json(json_path)
+            
+            # Extract the 'train' key data
+            train_data = dataset['train']
+            for item in train_data:
+                self.train_examples.append(item)
                 
     def __len__(self):
         return len(self.train_examples)
@@ -24,33 +31,33 @@ class DiffusionDataset(Dataset):
     def __getitem__(self, idx):
         try:
             example = self.train_examples[idx]
-            input = torch.tensor(example["input"], dtype=torch.float32).unsqueeze(0)
-            label = torch.tensor(example["output"], dtype=torch.float32).unsqueeze(0)
+            input_grid = torch.tensor(example["input"], dtype=torch.float32).unsqueeze(0)
+            output_grid = torch.tensor(example["output"], dtype=torch.float32).unsqueeze(0)
 
             # Normalize the pixel values
-            input = input / 9.0
-            label = label / 9.0
+            input_grid = input_grid / 9.0
+            output_grid = output_grid / 9.0
 
-            # Pad the images to a 30x30 grid
-            input = self.pad_to_32x32(input)
-            label = self.pad_to_32x32(label)
+            # Pad the grids to a 32x32 grid
+            input_grid = self.pad(input_grid, 30)
+            output_grid = self.pad(output_grid, 30)
 
             # Move tensors to the specified device
-            input = input.to(self.device)
-            label = label.to(self.device)
+            input_grid = input_grid.to(self.device)
+            output_grid = output_grid.to(self.device)
 
-            return input, label
+            return input_grid, output_grid
 
         except Exception as e:
             print(f"An error occurred while processing index {idx}: {e}")
             raise
 
-    def pad_to_32x32(self, tensor):
+    def pad(self, tensor, size):
         current_height = tensor.size(1)
         current_width = tensor.size(2)
 
-        pad_height = 32 - current_height
-        pad_width = 32 - current_width
+        pad_height = size - current_height
+        pad_width = size - current_width
 
         padding = (pad_width // 2, pad_width - pad_width // 2, pad_height // 2, pad_height - pad_height // 2)
 
@@ -59,15 +66,15 @@ class DiffusionDataset(Dataset):
         return padded_tensor
 
 
+
 # Example usage: Load and print the first batch of the training dataset
 if __name__ == "__main__":
-    json_dir = "D:/Praetorian-ARC-AGI/arc-data/arc-agi_training_challenges.json"
+    data_dir = "D:/Praetorian-ARC-AGI/arc-all"
     split = None
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     try:
-        task = 11
-        train_dataset = DiffusionDataset(json_dir, device, task, split)
+        train_dataset = DiffusionDataset(data_dir, device)
         train_dataloader = DataLoader(train_dataset, batch_size=1, shuffle=True)
         print(len(train_dataset))
         inputs_list=[]
