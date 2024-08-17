@@ -1,11 +1,8 @@
-import torch
-from torch.utils.data import Dataset, DataLoader
-import pandas as pd
-import numpy as np
-import torch.nn.functional as F
 import os
-
-# TODO: Make json files readable from pandas.
+import json
+import torch
+import torch.nn.functional as F
+from torch.utils.data import Dataset, DataLoader
 
 class DiffusionDataset(Dataset):
     def __init__(self, data_dir, device):
@@ -18,10 +15,11 @@ class DiffusionDataset(Dataset):
         
         # Load and process each JSON file
         for json_path in self.json_paths:
-            dataset = pd.read_json(json_path)
+            with open(json_path, 'r') as f:
+                dataset = json.load(f)
             
             # Extract the 'train' key data
-            train_data = dataset['train']
+            train_data = dataset.get('train', [])
             for item in train_data:
                 self.train_examples.append(item)
                 
@@ -38,7 +36,7 @@ class DiffusionDataset(Dataset):
             input_grid = input_grid / 9.0
             output_grid = output_grid / 9.0
 
-            # Pad the grids to a 32x32 grid
+            # Pad the grids to a 30x30 grid
             input_grid = self.pad(input_grid, 30)
             output_grid = self.pad(output_grid, 30)
 
@@ -65,12 +63,9 @@ class DiffusionDataset(Dataset):
 
         return padded_tensor
 
-
-
 # Example usage: Load and print the first batch of the training dataset
 if __name__ == "__main__":
     data_dir = "D:/Praetorian-ARC-AGI/arc-all"
-    split = None
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     try:
@@ -86,6 +81,7 @@ if __name__ == "__main__":
             print("Input: ", inputs)
             print("Label: ", labels)
             print(inputs.shape, labels.shape)
+            break
 
         print(len(inputs_list))
         print(len(labels_list))

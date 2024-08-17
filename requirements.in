@@ -4,6 +4,5 @@ pandas
 torchvision
 matplotlib
 einops
-wandb
-tensorflow
-blobfile
+torchmetrics
+tqdm
