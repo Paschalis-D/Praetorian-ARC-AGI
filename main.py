@@ -19,7 +19,7 @@ from torch.utils.data import DataLoader
 if __name__ == "__main__":
     data_dir = os.path.join(os.getcwd(), "arc-all")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = UNet(in_channels=1, base_num_filters=64)
+    model = UNet(image_channels=1)
     diffuser_train_dataset = DiffusionDataset(data_dir=data_dir, device=device)
     diffusion_dataloader = DataLoader(diffuser_train_dataset, batch_size=4, shuffle=True)
     optimizer = torch.optim.Adam(model.parameters(), lr = 0.001)

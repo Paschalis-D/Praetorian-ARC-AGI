@@ -4,115 +4,395 @@ import torch.nn.functional as F
 import torch
 import torch.nn as nn
 import tqdm
+import math
+from typing import Optional, Tuple, Union, List
+import torch
+
+class Swish(nn.Module):
+    """
+    ### Swish activation function
+
+    $$x \cdot \sigma(x)$$
+    """
+
+    def forward(self, x):
+        return x * torch.sigmoid(x)
+
+
+class TimeEmbedding(nn.Module):
+    """
+    ### Embeddings for $t$
+    """
+
+    def __init__(self, n_channels: int):
+        """
+        * `n_channels` is the number of dimensions in the embedding
+        """
+        super().__init__()
+        self.n_channels = n_channels
+        # First linear layer
+        self.lin1 = nn.Linear(self.n_channels // 4, self.n_channels)
+        # Activation
+        self.act = Swish()
+        # Second linear layer
+        self.lin2 = nn.Linear(self.n_channels, self.n_channels)
+
+    def forward(self, t: torch.Tensor):
+        # Create sinusoidal position embeddings
+        # [same as those from the transformer](../../transformers/positional_encoding.html)
+        #
+        # \begin{align}
+        # PE^{(1)}_{t,i} &= sin\Bigg(\frac{t}{10000^{\frac{i}{d - 1}}}\Bigg) \\
+        # PE^{(2)}_{t,i} &= cos\Bigg(\frac{t}{10000^{\frac{i}{d - 1}}}\Bigg)
+        # \end{align}
+        #
+        # where $d$ is `half_dim`
+        half_dim = self.n_channels // 8
+        emb = math.log(10_000) / (half_dim - 1)
+        emb = torch.exp(torch.arange(half_dim, device=t.device) * -emb)
+        emb = t[:, None] * emb[None, :]
+        emb = torch.cat((emb.sin(), emb.cos()), dim=1)
+
+        # Transform with the MLP
+        emb = self.act(self.lin1(emb))
+        emb = self.lin2(emb)
+
+        #
+        return emb
+
+
+class ResidualBlock(nn.Module):
+    """
+    ### Residual block
+
+    A residual block has two convolution layers with group normalization.
+    Each resolution is processed with two residual blocks.
+    """
+
+    def __init__(self, in_channels: int, out_channels: int, time_channels: int,
+                 n_groups: int = 32, dropout: float = 0.1):
+        """
+        * `in_channels` is the number of input channels
+        * `out_channels` is the number of input channels
+        * `time_channels` is the number channels in the time step ($t$) embeddings
+        * `n_groups` is the number of groups for [group normalization](../../normalization/group_norm/index.html)
+        * `dropout` is the dropout rate
+        """
+        super().__init__()
+        # Group normalization and the first convolution layer
+        self.norm1 = nn.GroupNorm(n_groups, in_channels)
+        self.act1 = Swish()
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=(3, 3), padding=(1, 1))
+
+        # Group normalization and the second convolution layer
+        self.norm2 = nn.GroupNorm(n_groups, out_channels)
+        self.act2 = Swish()
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=(3, 3), padding=(1, 1))
+
+        # If the number of input channels is not equal to the number of output channels we have to
+        # project the shortcut connection
+        if in_channels != out_channels:
+            self.shortcut = nn.Conv2d(in_channels, out_channels, kernel_size=(1, 1))
+        else:
+            self.shortcut = nn.Identity()
+
+        # Linear layer for time embeddings
+        self.time_emb = nn.Linear(time_channels, out_channels)
+        self.time_act = Swish()
+
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x: torch.Tensor, t: torch.Tensor):
+        """
+        * `x` has shape `[batch_size, in_channels, height, width]`
+        * `t` has shape `[batch_size, time_channels]`
+        """
+        # First convolution layer
+        h = self.conv1(self.act1(self.norm1(x)))
+        # Add time embeddings
+        h += self.time_emb(self.time_act(t))[:, :, None, None]
+        # Second convolution layer
+        h = self.conv2(self.dropout(self.act2(self.norm2(h))))
+
+        # Add the shortcut connection and return
+        return h + self.shortcut(x)
+
+
+class AttentionBlock(nn.Module):
+    """
+    ### Attention block
+
+    This is similar to [transformer multi-head attention](../../transformers/mha.html).
+    """
+
+    def __init__(self, n_channels: int, n_heads: int = 1, d_k: int = None, n_groups: int = 32):
+        """
+        * `n_channels` is the number of channels in the input
+        * `n_heads` is the number of heads in multi-head attention
+        * `d_k` is the number of dimensions in each head
+        * `n_groups` is the number of groups for [group normalization](../../normalization/group_norm/index.html)
+        """
+        super().__init__()
+
+        # Default `d_k`
+        if d_k is None:
+            d_k = n_channels
+        # Normalization layer
+        self.norm = nn.GroupNorm(n_groups, n_channels)
+        # Projections for query, key and values
+        self.projection = nn.Linear(n_channels, n_heads * d_k * 3)
+        # Linear layer for final transformation
+        self.output = nn.Linear(n_heads * d_k, n_channels)
+        # Scale for dot-product attention
+        self.scale = d_k ** -0.5
+        #
+        self.n_heads = n_heads
+        self.d_k = d_k
+
+    def forward(self, x: torch.Tensor, t: Optional[torch.Tensor] = None):
+        """
+        * `x` has shape `[batch_size, in_channels, height, width]`
+        * `t` has shape `[batch_size, time_channels]`
+        """
+        # `t` is not used, but it's kept in the arguments because for the attention layer function signature
+        # to match with `ResidualBlock`.
+        _ = t
+        # Get shape
+        batch_size, n_channels, height, width = x.shape
+        # Change `x` to shape `[batch_size, seq, n_channels]`
+        x = x.view(batch_size, n_channels, -1).permute(0, 2, 1)
+        # Get query, key, and values (concatenated) and shape it to `[batch_size, seq, n_heads, 3 * d_k]`
+        qkv = self.projection(x).view(batch_size, -1, self.n_heads, 3 * self.d_k)
+        # Split query, key, and values. Each of them will have shape `[batch_size, seq, n_heads, d_k]`
+        q, k, v = torch.chunk(qkv, 3, dim=-1)
+        # Calculate scaled dot-product $\frac{Q K^\top}{\sqrt{d_k}}$
+        attn = torch.einsum('bihd,bjhd->bijh', q, k) * self.scale
+        # Softmax along the sequence dimension $\underset{seq}{softmax}\Bigg(\frac{Q K^\top}{\sqrt{d_k}}\Bigg)$
+        attn = attn.softmax(dim=2)
+        # Multiply by values
+        res = torch.einsum('bijh,bjhd->bihd', attn, v)
+        # Reshape to `[batch_size, seq, n_heads * d_k]`
+        res = res.view(batch_size, -1, self.n_heads * self.d_k)
+        # Transform to `[batch_size, seq, n_channels]`
+        res = self.output(res)
+
+        # Add skip connection
+        res += x
+
+        # Change to shape `[batch_size, in_channels, height, width]`
+        res = res.permute(0, 2, 1).view(batch_size, n_channels, height, width)
+
+        #
+        return res
+
+
+class DownBlock(nn.Module):
+    """
+    ### Down block
+
+    This combines `ResidualBlock` and `AttentionBlock`. These are used in the first half of U-Net at each resolution.
+    """
+
+    def __init__(self, in_channels: int, out_channels: int, time_channels: int, has_attn: bool):
+        super().__init__()
+        self.res = ResidualBlock(in_channels, out_channels, time_channels)
+        if has_attn:
+            self.attn = AttentionBlock(out_channels)
+        else:
+            self.attn = nn.Identity()
+
+    def forward(self, x: torch.Tensor, t: torch.Tensor):
+        x = self.res(x, t)
+        x = self.attn(x)
+        return x
+
+
+class UpBlock(nn.Module):
+    """
+    ### Up block
+
+    This combines `ResidualBlock` and `AttentionBlock`. These are used in the second half of U-Net at each resolution.
+    """
+
+    def __init__(self, in_channels: int, out_channels: int, time_channels: int, has_attn: bool):
+        super().__init__()
+        # The input has `in_channels + out_channels` because we concatenate the output of the same resolution
+        # from the first half of the U-Net
+        self.res = ResidualBlock(in_channels + out_channels, out_channels, time_channels)
+        if has_attn:
+            self.attn = AttentionBlock(out_channels)
+        else:
+            self.attn = nn.Identity()
+
+    def forward(self, x: torch.Tensor, t: torch.Tensor):
+        x = self.res(x, t)
+        x = self.attn(x)
+        return x
+
+
+class MiddleBlock(nn.Module):
+    """
+    ### Middle block
+
+    It combines a `ResidualBlock`, `AttentionBlock`, followed by another `ResidualBlock`.
+    This block is applied at the lowest resolution of the U-Net.
+    """
+
+    def __init__(self, n_channels: int, time_channels: int):
+        super().__init__()
+        self.res1 = ResidualBlock(n_channels, n_channels, time_channels)
+        self.attn = AttentionBlock(n_channels)
+        self.res2 = ResidualBlock(n_channels, n_channels, time_channels)
+
+    def forward(self, x: torch.Tensor, t: torch.Tensor):
+        x = self.res1(x, t)
+        x = self.attn(x)
+        x = self.res2(x, t)
+        return x
+
+
+class Upsample(nn.Module):
+    """
+    ### Scale up the feature map by $2 \times$
+    """
+
+    def __init__(self, n_channels):
+        super().__init__()
+        self.conv = nn.ConvTranspose2d(n_channels, n_channels, (4, 4), (2, 2), (1, 1))
+
+    def forward(self, x: torch.Tensor, t: torch.Tensor):
+        # `t` is not used, but it's kept in the arguments because for the attention layer function signature
+        # to match with `ResidualBlock`.
+        _ = t
+        return self.conv(x)
+
+
+class Downsample(nn.Module):
+    """
+    ### Scale down the feature map by $\frac{1}{2} \times$
+    """
+
+    def __init__(self, n_channels):
+        super().__init__()
+        self.conv = nn.Conv2d(n_channels, n_channels, (3, 3), (2, 2), (1, 1))
+
+    def forward(self, x: torch.Tensor, t: torch.Tensor):
+        # `t` is not used, but it's kept in the arguments because for the attention layer function signature
+        # to match with `ResidualBlock`.
+        _ = t
+        return self.conv(x)
+
 
 class UNet(nn.Module):
-    def __init__(self, in_channels=1, base_num_filters=64, embed_size=1, num_timesteps=1000):
-        super(UNet, self).__init__()
-        self.in_channels = in_channels
-        self.base_num_filters = base_num_filters
-        self.embed_size = embed_size
+    """
+    ## U-Net
+    """
 
-        # Time embedding module
-        self.time_embedding = nn.Sequential(
-            nn.Linear(1, embed_size),
-            nn.ReLU(),
-            nn.Linear(embed_size, embed_size),
-        )
+    def __init__(self, image_channels: int = 3, n_channels: int = 64,
+                 ch_mults: Union[Tuple[int, ...], List[int]] = (1, 2, 2, 4),
+                 is_attn: Union[Tuple[bool, ...], List[bool]] = (False, False, True, True),
+                 n_blocks: int = 2):
+        """
+        * `image_channels` is the number of channels in the image. $3$ for RGB.
+        * `n_channels` is number of channels in the initial feature map that we transform the image into
+        * `ch_mults` is the list of channel numbers at each resolution. The number of channels is `ch_mults[i] * n_channels`
+        * `is_attn` is a list of booleans that indicate whether to use attention at each resolution
+        * `n_blocks` is the number of `UpDownBlocks` at each resolution
+        """
+        super().__init__()
 
-        # Conv layers to expand time embedding channels to match each encoder/decoder stage
-        self.time_emb_enc1 = nn.Conv2d(embed_size, base_num_filters, kernel_size=1)
-        self.time_emb_enc2 = nn.Conv2d(embed_size, base_num_filters * 2, kernel_size=1)
-        self.time_emb_enc3 = nn.Conv2d(embed_size, base_num_filters * 4, kernel_size=1)
-        self.time_emb_enc4 = nn.Conv2d(embed_size, base_num_filters * 8, kernel_size=1)
-        self.time_emb_bottleneck = nn.Conv2d(embed_size, base_num_filters * 16, kernel_size=1)
-        self.time_emb_dec4 = nn.Conv2d(embed_size, base_num_filters * 8, kernel_size=1)
-        self.time_emb_dec3 = nn.Conv2d(embed_size, base_num_filters * 4, kernel_size=1)
-        self.time_emb_dec2 = nn.Conv2d(embed_size, base_num_filters * 2, kernel_size=1)
-        self.time_emb_dec1 = nn.Conv2d(embed_size, base_num_filters, kernel_size=1)
+        # Number of resolutions
+        n_resolutions = len(ch_mults)
 
-        # Encoder path
-        self.enc1 = self.encoder_block(in_channels, base_num_filters)
-        self.enc2 = self.encoder_block(base_num_filters, base_num_filters * 2)
-        self.enc3 = self.encoder_block(base_num_filters * 2, base_num_filters * 4)
-        self.enc4 = self.encoder_block(base_num_filters * 4, base_num_filters * 8)
+        # Project image into feature map
+        self.image_proj = nn.Conv2d(image_channels, n_channels, kernel_size=(3, 3), padding=(1, 1))
 
-        # Bottleneck with additional residual block
-        self.bottleneck = self.residual_block(base_num_filters * 8, base_num_filters * 16)
+        # Time embedding layer. Time embedding has `n_channels * 4` channels
+        self.time_emb = TimeEmbedding(n_channels * 4)
 
-        # Decoder path
-        self.dec4 = self.decoder_block(base_num_filters * 16, base_num_filters * 8)
-        self.dec3 = self.decoder_block(base_num_filters * 8, base_num_filters * 4)
-        self.dec2 = self.decoder_block(base_num_filters * 4, base_num_filters * 2)
-        self.dec1 = self.decoder_block(base_num_filters * 2, base_num_filters)
+        # #### First half of U-Net - decreasing resolution
+        down = []
+        # Number of channels
+        out_channels = in_channels = n_channels
+        # For each resolution
+        for i in range(n_resolutions):
+            # Number of output channels at this resolution
+            out_channels = in_channels * ch_mults[i]
+            # Add `n_blocks`
+            for _ in range(n_blocks):
+                down.append(DownBlock(in_channels, out_channels, n_channels * 4, is_attn[i]))
+                in_channels = out_channels
+            # Down sample at all resolutions except the last
+            if i < n_resolutions - 1:
+                down.append(Downsample(in_channels))
 
-        # Final convolution to reduce to the original number of channels
-        self.final_conv = nn.Conv2d(base_num_filters, in_channels, kernel_size=1)
+        # Combine the set of modules
+        self.down = nn.ModuleList(down)
 
-        # Self-Attention layers (for specific feature map resolutions)
-        self.attn2 = nn.MultiheadAttention(base_num_filters * 4, num_heads=8, batch_first=True)
-        self.attn3 = nn.MultiheadAttention(base_num_filters * 8, num_heads=8, batch_first=True)
+        # Middle block
+        self.middle = MiddleBlock(out_channels, n_channels * 4, )
 
-    def forward(self, x, t):
-        # Generate time embedding
-        t = t.unsqueeze(-1).float()
-        time_emb = self.time_embedding(t).unsqueeze(-1).unsqueeze(-1)
+        # #### Second half of U-Net - increasing resolution
+        up = []
+        # Number of channels
+        in_channels = out_channels
+        # For each resolution
+        for i in reversed(range(n_resolutions)):
+            # `n_blocks` at the same resolution
+            out_channels = in_channels
+            for _ in range(n_blocks):
+                up.append(UpBlock(in_channels, out_channels, n_channels * 4, is_attn[i]))
+            # Final block to reduce the number of channels
+            out_channels = in_channels // ch_mults[i]
+            up.append(UpBlock(in_channels, out_channels, n_channels * 4, is_attn[i]))
+            in_channels = out_channels
+            # Up sample at all resolutions except last
+            if i > 0:
+                up.append(Upsample(in_channels))
 
-        # Encoder path with time embeddings
-        enc1 = self.enc1(x + self.time_emb_enc1(time_emb.expand(-1, -1, x.size(2), x.size(3))))
-        enc2 = self.enc2(enc1 + self.time_emb_enc2(time_emb.expand(-1, -1, enc1.size(2), enc1.size(3))))
-        enc3 = self.enc3(enc2 + self.time_emb_enc3(time_emb.expand(-1, -1, enc2.size(2), enc2.size(3))))
-        enc4 = self.enc4(enc3 + self.time_emb_enc4(time_emb.expand(-1, -1, enc3.size(2), enc3.size(3))))
+        # Combine the set of modules
+        self.up = nn.ModuleList(up)
 
-        # Bottleneck
-        bottleneck = self.bottleneck(enc4 + self.time_emb_bottleneck(time_emb.expand(-1, -1, enc4.size(2), enc4.size(3))))
+        # Final normalization and convolution layer
+        self.norm = nn.GroupNorm(8, n_channels)
+        self.act = Swish()
+        self.final = nn.Conv2d(in_channels, image_channels, kernel_size=(3, 3), padding=(1, 1))
 
-        # Decoder path with skip connections and time embeddings
-        dec4 = self.dec4(bottleneck + enc4 + self.time_emb_dec4(time_emb.expand(-1, -1, bottleneck.size(2), bottleneck.size(3))))
-        dec3 = self.dec3(dec4 + enc3 + self.time_emb_dec3(time_emb.expand(-1, -1, dec4.size(2), dec4.size(3))))
+    def forward(self, x: torch.Tensor, t: torch.Tensor):
+        """
+        * `x` has shape `[batch_size, in_channels, height, width]`
+        * `t` has shape `[batch_size]`
+        """
 
-        # Apply self-attention at the appropriate levels (16x16 and 8x8)
-        dec3_flat = dec3.flatten(2).permute(0, 2, 1)
-        dec3, _ = self.attn3(dec3_flat, dec3_flat, dec3_flat)
-        dec3 = dec3.permute(0, 2, 1).view_as(dec4)
+        # Get time-step embeddings
+        t = self.time_emb(t)
 
-        dec2 = self.dec2(dec3 + enc2 + self.time_emb_dec2(time_emb.expand(-1, -1, dec3.size(2), dec3.size(3))))
+        # Get image projection
+        x = self.image_proj(x)
 
-        dec2_flat = dec2.flatten(2).permute(0, 2, 1)
-        dec2, _ = self.attn2(dec2_flat, dec2_flat, dec2_flat)
-        dec2 = dec2.permute(0, 2, 1).view_as(dec3)
+        # `h` will store outputs at each resolution for skip connection
+        h = [x]
+        # First half of U-Net
+        for m in self.down:
+            x = m(x, t)
+            h.append(x)
 
-        dec1 = self.dec1(dec2 + enc1 + self.time_emb_dec1(time_emb.expand(-1, -1, dec2.size(2), dec2.size(3))))
+        # Middle (bottom)
+        x = self.middle(x, t)
 
-        # Final output
-        out = self.final_conv(dec1)
-        return out
+        # Second half of U-Net
+        for m in self.up:
+            if isinstance(m, Upsample):
+                x = m(x, t)
+            else:
+                # Get the skip connection from first half of U-Net and concatenate
+                s = h.pop()
+                x = torch.cat((x, s), dim=1)
+                #
+                x = m(x, t)
 
-    def residual_block(self, in_channels, out_channels):
-        return nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True),
-        )
-        
-    def encoder_block(self, in_channels, num_filters):
-        return nn.Sequential(
-            self.residual_block(in_channels, num_filters),
-            self.residual_block(num_filters, num_filters),
-            nn.MaxPool2d(kernel_size=2, stride=2)
-        )
-        
-    def decoder_block(self, in_channels, num_filters):
-        return nn.Sequential(
-            nn.ConvTranspose2d(in_channels, num_filters, kernel_size=2, stride=2),
-            self.residual_block(num_filters, num_filters)
-        )
-
+        # Final normalization and convolution
+        return self.final(self.act(self.norm(x)))
 
 
 
