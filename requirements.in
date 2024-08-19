@@ -6,3 +6,5 @@ matplotlib
 einops
 torchmetrics
 tqdm
+labml
+labml_helpers
