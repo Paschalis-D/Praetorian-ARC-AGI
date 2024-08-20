@@ -3,32 +3,51 @@ import json
 import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
+from torchvision.transforms.functional import resize, center_crop
 
 class DiffusionDataset(Dataset):
-    def __init__(self, data_dir, device):
+    def __init__(self, data_dir: str, device: torch.device, split: str):
         self.data_dir = data_dir
         self.device = device
-        self.train_examples = []
+        self.split = split
         
         # Collect all JSON files in the directory
         self.json_paths = [os.path.join(data_dir, json_file) for json_file in os.listdir(data_dir)]
+        
+        # Initialize empty list to store examples
+        self.examples = []
         
         # Load and process each JSON file
         for json_path in self.json_paths:
             with open(json_path, 'r') as f:
                 dataset = json.load(f)
             
-            # Extract the 'train' key data
-            train_data = dataset.get('train', [])
-            for item in train_data:
-                self.train_examples.append(item)
-                
+            # Extract the data based on the split
+            if split == 'train':
+                data = dataset.get('train', [])
+            elif split == 'val':
+                data = dataset.get('test', [])
+            else:
+                raise ValueError(f"Invalid split: {split}. Expected 'train' or 'val'.")
+            
+            # Add the extracted data to examples, skipping those with large dimensions
+            for item in data:
+                input_grid = torch.tensor(item["input"], dtype=torch.float32)
+                output_grid = torch.tensor(item["output"], dtype=torch.float32)
+
+                if input_grid.shape[0] <= 32 and input_grid.shape[1] <= 32 and \
+                   output_grid.shape[0] <= 32 and output_grid.shape[1] <= 32:
+                    self.examples.append(item)
+                else:
+                    print(f"Skipping example with size {input_grid.shape} and {output_grid.shape}.")
+
     def __len__(self):
-        return len(self.train_examples)
+        return len(self.examples)
 
     def __getitem__(self, idx):
         try:
-            example = self.train_examples[idx]
+            example = self.examples[idx]
+            
             input_grid = torch.tensor(example["input"], dtype=torch.float32).unsqueeze(0)
             output_grid = torch.tensor(example["output"], dtype=torch.float32).unsqueeze(0)
 
@@ -37,14 +56,15 @@ class DiffusionDataset(Dataset):
             output_grid = output_grid / 9.0
 
             # Pad the grids to a 30x30 grid
-            input_grid = self.pad(input_grid, 30)
-            output_grid = self.pad(output_grid, 30)
+            input_grid = self.pad(input_grid, 32)
+            output_grid = self.pad(output_grid, 32)
 
             # Move tensors to the specified device
             input_grid = input_grid.to(self.device)
             output_grid = output_grid.to(self.device)
 
-            return input_grid, output_grid
+            return {"x": input_grid, 
+                    "y": output_grid}
 
         except Exception as e:
             print(f"An error occurred while processing index {idx}: {e}")
@@ -59,7 +79,7 @@ class DiffusionDataset(Dataset):
 
         padding = (pad_width // 2, pad_width - pad_width // 2, pad_height // 2, pad_height - pad_height // 2)
 
-        padded_tensor = F.pad(tensor, padding, mode='constant', value=-1)
+        padded_tensor = F.pad(tensor, padding, mode='constant', value=0)
 
         return padded_tensor
 

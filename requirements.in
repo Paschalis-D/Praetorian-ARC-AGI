@@ -8,3 +8,4 @@ torchmetrics
 tqdm
 labml
 labml_helpers
+scikit-image

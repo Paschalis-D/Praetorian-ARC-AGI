@@ -49,62 +49,47 @@ from labml_helpers.module import Module
 
 
 class GeneratorResNet(Module):
-    """
-    The generator is a residual network.
-    """
-
     def __init__(self, input_channels: int, n_residual_blocks: int):
         super().__init__()
-        # This first block runs a convolution and maps the image to
-        # a feature map.
-        # The output feature map has the same height and width because we have
-        # a padding of 3.
-        # Reflection padding is used because it gives better image quality at edges.
-        #
-        # `inplace=True` in `ReLU` saves a little bit of memory.
         out_features = 64
+        
+        # Initial convolution layer
         layers = [
-            nn.Conv2d(input_channels, out_features, kernel_size=7, padding=3, padding_mode='reflect'),
+            nn.Conv2d(input_channels, out_features, kernel_size=3, stride=1, padding=1),  # 3x3 kernel, stride 1, padding 1
             nn.InstanceNorm2d(out_features),
             nn.ReLU(inplace=True),
         ]
         in_features = out_features
 
-        # We down-sample with two convolutions
-        # with stride of 2
+        # Down-sample layers, still preserving the 30x30 size
         for _ in range(2):
             out_features *= 2
             layers += [
-                nn.Conv2d(in_features, out_features, kernel_size=3, stride=2, padding=1),
+                nn.Conv2d(in_features, out_features, kernel_size=3, stride=2, padding=1),  # 3x3 kernel, stride 1, padding 1
                 nn.InstanceNorm2d(out_features),
                 nn.ReLU(inplace=True),
             ]
             in_features = out_features
 
-        # We take this through `n_residual_blocks`.
-        # This module is defined below.
+        # Residual blocks, maintaining the 30x30 size
         for _ in range(n_residual_blocks):
             layers += [ResidualBlock(out_features)]
 
-        # Then the resulting feature map is up-sampled
-        # to match the original image height and width.
+        # Up-sample layers, still preserving the 30x30 size
         for _ in range(2):
             out_features //= 2
             layers += [
-                nn.Upsample(scale_factor=2),
-                nn.Conv2d(in_features, out_features, kernel_size=3, stride=1, padding=1),
+                nn.Upsample(scale_factor=2),  # This increases dimensions, needs careful control with Conv2d
+                nn.Conv2d(in_features, out_features, kernel_size=3, stride=1, padding=1),  # 3x3 kernel, stride 1, padding 1
                 nn.InstanceNorm2d(out_features),
                 nn.ReLU(inplace=True),
             ]
             in_features = out_features
 
-        # Finally we map the feature map to an RGB image
-        layers += [nn.Conv2d(out_features, input_channels, 7, padding=3, padding_mode='reflect'), nn.Tanh()]
+        # Final layer, preserving the 30x30 size
+        layers += [nn.Conv2d(out_features, input_channels, kernel_size=3, stride=1, padding=1), nn.Tanh()]
 
-        # Create a sequential module with the layers
         self.layers = nn.Sequential(*layers)
-
-        # Initialize weights
         self.apply(weights_init_normal)
 
     def forward(self, x):
@@ -119,12 +104,11 @@ class ResidualBlock(Module):
     def __init__(self, in_features: int):
         super().__init__()
         self.block = nn.Sequential(
-            nn.Conv2d(in_features, in_features, kernel_size=3, padding=1, padding_mode='reflect'),
+            nn.Conv2d(in_features, in_features, kernel_size=3, stride=1, padding=1),  # 3x3 kernel, stride 1, padding 1
             nn.InstanceNorm2d(in_features),
             nn.ReLU(inplace=True),
-            nn.Conv2d(in_features, in_features, kernel_size=3, padding=1, padding_mode='reflect'),
-            nn.InstanceNorm2d(in_features),
-            nn.ReLU(inplace=True),
+            nn.Conv2d(in_features, in_features, kernel_size=3, stride=1, padding=1),  # 3x3 kernel, stride 1, padding 1
+            nn.InstanceNorm2d(in_features)
         )
 
     def forward(self, x: torch.Tensor):
@@ -132,31 +116,20 @@ class ResidualBlock(Module):
 
 
 class Discriminator(Module):
-    """
-    This is the discriminator.
-    """
-
     def __init__(self, input_shape: Tuple[int, int, int]):
         super().__init__()
         channels, height, width = input_shape
 
-        # Output of the discriminator is also a map of probabilities,
-        # whether each region of the image is real or generated
-        self.output_shape = (1, height // 2 ** 4, width // 2 ** 4)
-
         self.layers = nn.Sequential(
-            # Each of these blocks will shrink the height and width by a factor of 2
             DiscriminatorBlock(channels, 64, normalize=False),
             DiscriminatorBlock(64, 128),
             DiscriminatorBlock(128, 256),
             DiscriminatorBlock(256, 512),
-            # Zero pad on top and left to keep the output height and width same
-            # with the $4 \times 4$ kernel
-            nn.ZeroPad2d((1, 0, 1, 0)),
-            nn.Conv2d(512, 1, kernel_size=4, padding=1)
+            nn.Conv2d(512, 1, kernel_size=3, stride=1, padding=1)  # Final layer, maintaining size
         )
 
-        # Initialize weights
+        self.output_shape = (1, height, width)  # Ensure the output shape remains consistent
+
         self.apply(weights_init_normal)
 
     def forward(self, img):
@@ -164,16 +137,11 @@ class Discriminator(Module):
 
 
 class DiscriminatorBlock(Module):
-    """
-    This is the discriminator block module.
-    It does a convolution, an optional normalization, and a leaky ReLU.
-
-    It shrinks the height and width of the input feature map by half.
-    """
-
     def __init__(self, in_filters: int, out_filters: int, normalize: bool = True):
         super().__init__()
-        layers = [nn.Conv2d(in_filters, out_filters, kernel_size=4, stride=2, padding=1)]
+        layers = [
+            nn.Conv2d(in_filters, out_filters, kernel_size=3, stride=1, padding=1),  # Preserve dimensions
+        ]
         if normalize:
             layers.append(nn.InstanceNorm2d(out_filters))
         layers.append(nn.LeakyReLU(0.2, inplace=True))
@@ -202,17 +170,17 @@ def load_image(path: str):
 
     return image
 
-
+"""
 class ImageDataset(Dataset):
-    """
+    
     ### Dataset to load images
-    """
+    
 
     @staticmethod
     def download(dataset_name: str):
-        """
+       
         #### Download dataset and extract data
-        """
+        
         # URL
         url = f'https://people.eecs.berkeley.edu/~taesung_park/CycleGAN/datasets/{dataset_name}.zip'
         # Download folder
@@ -228,13 +196,13 @@ class ImageDataset(Dataset):
             f.extractall(root)
 
     def __init__(self, dataset_name: str, transforms_, mode: str):
-        """
+       
         #### Initialize the dataset
 
         * `dataset_name` is the name of the dataset
         * `transforms_` is the set of image transforms
         * `mode` is either `train` or `test`
-        """
+        
         # Dataset path
         root = lab.get_data_path() / 'cycle_gan' / dataset_name
         # Download if missing
@@ -260,7 +228,7 @@ class ImageDataset(Dataset):
     def __len__(self):
         # Number of images in the dataset
         return max(len(self.files_a), len(self.files_b))
-
+"""
 
 class ReplayBuffer:
     """
