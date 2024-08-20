@@ -60,8 +60,8 @@ class DiffusionDataset(Dataset):
             output_grid = self.pad(output_grid, 32)
 
             # Move tensors to the specified device
-            input_grid = input_grid.to(self.device)
-            output_grid = output_grid.to(self.device)
+            input_grid = input_grid
+            output_grid = output_grid
 
             return {"x": input_grid, 
                     "y": output_grid}
@@ -89,13 +89,13 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     try:
-        train_dataset = DiffusionDataset(data_dir, device)
+        train_dataset = DiffusionDataset(data_dir, device, split="val")
         train_dataloader = DataLoader(train_dataset, batch_size=1, shuffle=True)
         print(len(train_dataset))
         inputs_list=[]
         labels_list=[]
         for batch in train_dataloader:
-            inputs, labels = batch
+            inputs, labels = batch["x"], batch["y"]
             inputs_list.append(inputs)
             labels_list.append(labels)
             print("Input: ", inputs)

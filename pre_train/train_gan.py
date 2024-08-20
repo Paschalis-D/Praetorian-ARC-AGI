@@ -49,7 +49,7 @@ class TrainGAN:
         self.cyclic_loss_coefficient = 10.0
         self.identity_loss_coefficient = 5.
 
-        self.sample_interval = 2000
+        self.sample_interval = 10
 
         # Models
         self.generator_xy: GeneratorResNet
