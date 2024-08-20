@@ -79,7 +79,7 @@ class DiffusionDataset(Dataset):
 
         padding = (pad_width // 2, pad_width - pad_width // 2, pad_height // 2, pad_height - pad_height // 2)
 
-        padded_tensor = F.pad(tensor, padding, mode='constant', value=0)
+        padded_tensor = F.pad(tensor, padding, mode='constant', value=-1)
 
         return padded_tensor
 

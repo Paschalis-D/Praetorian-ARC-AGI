@@ -11,9 +11,10 @@ import numpy as np
 from skimage.metrics import structural_similarity as ssim
 import torchvision.transforms as transforms
 from tqdm import tqdm
+import json
 from models.cycleGAN import *
 from torch_datasets.diffusion_dataset import DiffusionDataset
-from torchvision.utils import make_grid
+from torchvision.utils import make_grid, save_image
 from labml import tracker, experiment, monit
 
 class TrainGAN:
@@ -21,12 +22,12 @@ class TrainGAN:
         self.device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # Hyper-parameters
-        self.epochs = 100
+        self.epochs = 20
         self.batch_size = 1
         self.dataloader_workers = 4
         self.learning_rate = 0.0002
         self.adam_betas = (0.5, 0.999)
-        self.decay_start = 20
+        self.decay_start = 10
 
         # The paper suggests using a least-squares loss instead of
         # negative log-likelihood, at it is found to be more stable.
@@ -48,7 +49,7 @@ class TrainGAN:
         self.cyclic_loss_coefficient = 10.0
         self.identity_loss_coefficient = 5.
 
-        self.sample_interval = 500
+        self.sample_interval = 2000
 
         # Models
         self.generator_xy: GeneratorResNet
@@ -69,8 +70,10 @@ class TrainGAN:
         self.dataloader: DataLoader
         self.valid_dataloader: DataLoader
 
-    def sample_images(self, n: int):
-        """Generate samples from test set and save them"""
+    def sample_images(self, n: int, output_dir: str = "./sample_images"):
+        """Generate samples from test set and save them as JSON files"""
+        os.makedirs(output_dir, exist_ok=True)  # Ensure the output directory exists
+
         batch = next(iter(self.valid_dataloader))
         self.generator_xy.eval()
         self.generator_yx.eval()
@@ -79,17 +82,31 @@ class TrainGAN:
             gen_y = self.generator_xy(data_x)
             gen_x = self.generator_yx(data_y)
 
-            # Arrange images along x-axis
-            data_x = make_grid(data_x, nrow=5, normalize=True)
-            data_y = make_grid(data_y, nrow=5, normalize=True)
-            gen_x = make_grid(gen_x, nrow=5, normalize=True)
-            gen_y = make_grid(gen_y, nrow=5, normalize=True)
+            # Multiply by 9 and round to nearest integer
+            data_x = torch.round(data_x * 9).cpu().numpy().astype(int)
+            data_y = torch.round(data_y * 9).cpu().numpy().astype(int)
+            gen_x = torch.round(gen_x * 9).cpu().numpy().astype(int)
+            gen_y = torch.round(gen_y * 9).cpu().numpy().astype(int)
 
-            # Arrange images along y-axis
-            image_grid = torch.cat((data_x, gen_y, data_y, gen_x), 1)
+            # Convert the tensors to lists of lists for JSON serialization
+            def tensor_to_list(tensor):
+                return tensor.squeeze().tolist()  # Remove batch and channel dimensions, then convert to a list
 
-        # Show samples
-        plot_image(image_grid)
+            # Prepare data for JSON serialization
+            json_data = {
+                f"original_x_{n}": tensor_to_list(data_x),
+                f"generated_y_{n}": tensor_to_list(gen_y),
+                f"original_y_{n}": tensor_to_list(data_y),
+                f"generated_x_{n}": tensor_to_list(gen_x)
+            }
+
+            # Save the data to JSON files
+            for key, value in json_data.items():
+                json_path = os.path.join(output_dir, f"{key}.json")
+                with open(json_path, 'w') as json_file:
+                    json.dump(value, json_file, indent=4)
+
+        print(f"JSON files saved in {output_dir}")
 
     def initialize(self):
         """
