@@ -13,7 +13,7 @@ import torchvision.transforms as transforms
 from tqdm import tqdm
 import json
 from models.cycleGAN import *
-from torch_datasets.diffusion_dataset import DiffusionDataset
+from torch_datasets.gan_dataset import GanDataset
 from torchvision.utils import make_grid, save_image
 from labml import tracker, experiment, monit
 
@@ -160,7 +160,7 @@ class TrainGAN:
 
         # Training data loader
         self.dataloader = DataLoader(
-            DiffusionDataset(self.data_dir, self.device, "train"),
+            GanDataset(self.data_dir, self.device, "train"),
             batch_size=self.batch_size,
             shuffle=True,
             num_workers=self.dataloader_workers,
@@ -168,7 +168,7 @@ class TrainGAN:
 
         # Validation data loader
         self.valid_dataloader = DataLoader(
-            DiffusionDataset(self.data_dir, self.device, "val"),
+            GanDataset(self.data_dir, self.device, "val"),
             batch_size=self.batch_size,
             shuffle=True,
             num_workers=self.dataloader_workers,
