@@ -1,0 +1,7 @@
+First training of GAN gave 
+Average MSE: 0.052792333844206576
+Average SSIM: 0.8298964410006664
+
+Second run with 15 residual blocks and an enhanced discriminator
+Average MSE: 0.05327599825869509
+Average SSIM: 0.8326089632046887

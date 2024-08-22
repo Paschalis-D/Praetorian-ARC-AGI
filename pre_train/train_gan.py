@@ -25,9 +25,9 @@ class TrainGAN:
         self.epochs = 20
         self.batch_size = 1
         self.dataloader_workers = 4
-        self.learning_rate = 0.0002
+        self.learning_rate = 0.001
         self.adam_betas = (0.5, 0.999)
-        self.decay_start = 10
+        self.decay_start = 5
 
         # The paper suggests using a least-squares loss instead of
         # negative log-likelihood, at it is found to be more stable.
@@ -43,13 +43,13 @@ class TrainGAN:
         self.img_channels = 1
 
         # Number of residual blocks in the generator
-        self.n_residual_blocks = 9
+        self.n_residual_blocks = 15
 
         # Loss coefficients
         self.cyclic_loss_coefficient = 10.0
         self.identity_loss_coefficient = 5.
 
-        self.sample_interval = 10
+        self.sample_interval = 10000
 
         # Models
         self.generator_xy: GeneratorResNet
@@ -71,8 +71,22 @@ class TrainGAN:
         self.valid_dataloader: DataLoader
 
     def sample_images(self, n: int, output_dir: str = "./sample_images"):
-        """Generate samples from test set and save them as JSON files"""
+        """Generate samples from test set and save them as color-mapped images"""
         os.makedirs(output_dir, exist_ok=True)  # Ensure the output directory exists
+
+        # Define a color mapping for integers from 0 to 9 (example)
+        color_map = {
+            0: (0, 0, 0),       # Black
+            1: (255, 0, 0),     # Red
+            2: (0, 255, 0),     # Green
+            3: (0, 0, 255),     # Blue
+            4: (255, 255, 0),   # Yellow
+            5: (255, 0, 255),   # Magenta
+            6: (0, 255, 255),   # Cyan
+            7: (255, 165, 0),   # Orange
+            8: (128, 0, 128),   # Purple
+            9: (255, 255, 255)  # White
+        }
 
         batch = next(iter(self.valid_dataloader))
         self.generator_xy.eval()
@@ -88,25 +102,32 @@ class TrainGAN:
             gen_x = torch.round(gen_x * 9).cpu().numpy().astype(int)
             gen_y = torch.round(gen_y * 9).cpu().numpy().astype(int)
 
-            # Convert the tensors to lists of lists for JSON serialization
-            def tensor_to_list(tensor):
-                return tensor.squeeze().tolist()  # Remove batch and channel dimensions, then convert to a list
+            # Convert the tensors to color images using the color map
+            def map_to_color(tensor):
+                # Ensure tensor is 2D by squeezing out any channel dimension
+                if tensor.ndim == 3:
+                    tensor = tensor.squeeze(0)  # Assuming tensor shape is (1, height, width)
+                elif tensor.ndim == 4:
+                    tensor = tensor.squeeze(0).squeeze(0)  # Assuming tensor shape is (batch_size, 1, height, width)
 
-            # Prepare data for JSON serialization
-            json_data = {
-                f"original_x_{n}": tensor_to_list(data_x),
-                f"generated_y_{n}": tensor_to_list(gen_y),
-                f"original_y_{n}": tensor_to_list(data_y),
-                f"generated_x_{n}": tensor_to_list(gen_x)
-            }
+                height, width = tensor.shape  # Get height and width from the squeezed tensor
+                color_image = np.zeros((height, width, 3), dtype=np.uint8)  # Initialize a blank RGB image
 
-            # Save the data to JSON files
-            for key, value in json_data.items():
-                json_path = os.path.join(output_dir, f"{key}.json")
-                with open(json_path, 'w') as json_file:
-                    json.dump(value, json_file, indent=4)
+                # Apply color mapping
+                for int_val, color in color_map.items():
+                    mask = (tensor == int_val)  # Create a mask for the current integer value
+                    color_image[mask] = color  # Apply the color where the mask is True
 
-        print(f"JSON files saved in {output_dir}")
+                return Image.fromarray(color_image)
+
+
+            # Save the images
+            map_to_color(data_x).save(os.path.join(output_dir, f"original_x_{n}.png"))
+            map_to_color(gen_y).save(os.path.join(output_dir, f"generated_y_{n}.png"))
+            map_to_color(data_y).save(os.path.join(output_dir, f"original_y_{n}.png"))
+            map_to_color(gen_x).save(os.path.join(output_dir, f"generated_x_{n}.png"))
+
+        print(f"Color-mapped images saved in {output_dir}")
 
     def initialize(self):
         """
@@ -158,7 +179,8 @@ class TrainGAN:
         # Replay buffers to keep generated samples
         gen_x_buffer = ReplayBuffer()
         gen_y_buffer = ReplayBuffer()
-
+        best_ssim = 0
+        best_mse = 1
         # Loop through epochs
         for epoch in monit.loop(self.epochs):
             # Loop through the dataset
@@ -189,12 +211,19 @@ class TrainGAN:
                 # Save images at intervals
                 batches_done = epoch * len(self.dataloader) + i
                 if batches_done % self.sample_interval == 0:
-                    # Save generator_xy model state_dict
-                    checkpoint_path = os.path.join(f"{os.getcwd()}/checkpoints/cyclegan_checkpoints", f"generator_xy_checkpoint_epoch_{epoch}_batch_{batches_done}.pth")
-                    torch.save(self.generator_xy.state_dict(), checkpoint_path)
-                    print(f"Saved checkpoint: {checkpoint_path}")
                     # Sample images
                     self.sample_images(batches_done)
+
+            # Save the best model when epoch finishes
+            avg_mse, avg_ssim = self.evaluate()   
+            if avg_mse < best_mse or avg_ssim > best_ssim: 
+                # Save generator_xy model state_dict
+                checkpoint_path = os.path.join(f"{os.getcwd()}/checkpoints/cyclegan_checkpoints", f"generator_xy_checkpoint_epoch_{epoch}_run_2.pth")
+                torch.save(self.generator_xy.state_dict(), checkpoint_path)
+                print(f"Saved best model to: {checkpoint_path}")
+                best_mse = avg_mse
+                best_ssim = avg_ssim
+
             # Update learning rates
             self.generator_lr_scheduler.step()
             self.discriminator_lr_scheduler.step()
@@ -305,16 +334,14 @@ class TrainGAN:
                 ssim_batch = self.calculate_ssim(gen_y, data_y)
                 total_ssim += ssim_batch
 
-                # Optionally, save or display the generated images
-                if i == 0:  # Just show the first batch
-                    self.display_comparison(data_x, data_y, gen_y)
-
         # Compute the average metrics
         avg_mse = total_mse / num_batches
         avg_ssim = total_ssim / num_batches
 
         print(f"Average MSE: {avg_mse}")
         print(f"Average SSIM: {avg_ssim}")
+
+        return avg_mse, avg_ssim
 
     def calculate_ssim(self, gen_y, data_y):
         """

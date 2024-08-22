@@ -125,7 +125,10 @@ class Discriminator(Module):
             DiscriminatorBlock(64, 128),
             DiscriminatorBlock(128, 256),
             DiscriminatorBlock(256, 512),
-            nn.Conv2d(512, 1, kernel_size=3, stride=1, padding=1)  # Final layer, maintaining size
+            DiscriminatorBlock(512, 1024),
+            DiscriminatorBlock(1024, 512),
+            DiscriminatorBlock(512, 256),
+            nn.Conv2d(256, 1, kernel_size=3, stride=1, padding=1)  # Final layer, maintaining size
         )
 
         self.output_shape = (1, height, width)  # Ensure the output shape remains consistent
