@@ -1,21 +1,14 @@
 import torch
-import torch.nn as nn
-import torch.optim as optim
 from torch.utils.data import DataLoader
-from torch.cuda import amp
 import os
-import gc
 import itertools
 from matplotlib import pyplot as plt
 import numpy as np
 from skimage.metrics import structural_similarity as ssim
-import torchvision.transforms as transforms
 from tqdm import tqdm
-import json
 from models.cycleGAN import *
 from torch_datasets.gan_dataset import GanDataset
-from torchvision.utils import make_grid, save_image
-from labml import tracker, experiment, monit
+from labml import tracker
 
 class TrainGAN:
     def __init__(self):
@@ -25,7 +18,7 @@ class TrainGAN:
         self.epochs = 20
         self.batch_size = 1
         self.dataloader_workers = 4
-        self.learning_rate = 0.001
+        self.learning_rate = 0.0001
         self.adam_betas = (0.5, 0.999)
         self.decay_start = 5
 
@@ -66,7 +59,7 @@ class TrainGAN:
         self.discriminator_lr_scheduler: torch.optim.lr_scheduler.LambdaLR
 
         # Data loaders
-        self.data_dir = "D:/Praetorian-ARC-AGI/arc-all"
+        self.data_dir = "D:/Praetorian-ARC-AGI/arc-prize"
         self.dataloader: DataLoader
         self.valid_dataloader: DataLoader
 
@@ -137,6 +130,7 @@ class TrainGAN:
 
         # Create the models
         self.generator_xy = GeneratorResNet(self.img_channels, self.n_residual_blocks).to(self.device)
+        self.generator_xy.load_state_dict(torch.load("./checkpoints/gan_checkpoint.pth", map_location= torch.device(self.device)))
         self.generator_yx = GeneratorResNet(self.img_channels, self.n_residual_blocks).to(self.device)
         self.discriminator_x = Discriminator(input_shape).to(self.device)
         self.discriminator_y = Discriminator(input_shape).to(self.device)
@@ -175,60 +169,52 @@ class TrainGAN:
         )
 
     def run(self):
-        
         # Replay buffers to keep generated samples
         gen_x_buffer = ReplayBuffer()
         gen_y_buffer = ReplayBuffer()
-        best_ssim = 0
-        best_mse = 1
-        # Loop through epochs
-        for epoch in monit.loop(self.epochs):
-            # Loop through the dataset
-            for i, batch in monit.enum('Train', self.dataloader):
-                # Move images to the device
-                data_x, data_y = batch['x'].to(self.device), batch['y'].to(self.device)
 
-                # true labels equal to $1$
-                true_labels = torch.ones(data_x.size(0), *self.discriminator_x.output_shape,
-                                         device=self.device, requires_grad=False)
-                # false labels equal to $0$
-                false_labels = torch.zeros(data_x.size(0), *self.discriminator_x.output_shape,
-                                           device=self.device, requires_grad=False)
+        # Loop through epochs with tqdm progress bar
+        for epoch in range(self.epochs):
+            print(f"Epoch {epoch+1}/{self.epochs}")
+            
+            # Initialize tqdm progress bar for batches
+            with tqdm(total=len(self.dataloader), desc="Training") as pbar:
+                # Loop through the dataset
+                for i, batch in enumerate(self.dataloader):
+                    # Move images to the device
+                    data_x, data_y = batch['x'].to(self.device), batch['y'].to(self.device)
 
-                # Train the generators.
-                # This returns the generated images.
-                gen_x, gen_y = self.optimize_generators(data_x, data_y, true_labels)
+                    # true labels equal to $1$
+                    true_labels = torch.ones(data_x.size(0), *self.discriminator_x.output_shape,
+                                            device=self.device, requires_grad=False)
+                    # false labels equal to $0$
+                    false_labels = torch.zeros(data_x.size(0), *self.discriminator_x.output_shape,
+                                            device=self.device, requires_grad=False)
 
-                #  Train discriminators
-                self.optimize_discriminator(data_x, data_y,
-                                            gen_x_buffer.push_and_pop(gen_x), gen_y_buffer.push_and_pop(gen_y),
-                                            true_labels, false_labels)
+                    # Train the generators.
+                    # This returns the generated images.
+                    gen_x, gen_y = self.optimize_generators(data_x, data_y, true_labels)
 
-                # Save training statistics and increment the global step counter
-                tracker.save()
-                tracker.add_global_step(max(len(data_x), len(data_y)))
+                    #  Train discriminators
+                    self.optimize_discriminator(data_x, data_y,
+                                                gen_x_buffer.push_and_pop(gen_x), gen_y_buffer.push_and_pop(gen_y),
+                                                true_labels, false_labels)
 
-                # Save images at intervals
-                batches_done = epoch * len(self.dataloader) + i
-                if batches_done % self.sample_interval == 0:
-                    # Sample images
-                    self.sample_images(batches_done)
+                    # Save images at intervals
+                    batches_done = epoch * len(self.dataloader) + i
+                    if batches_done % self.sample_interval == 0:
+                        # Sample images
+                        self.sample_images(batches_done)
 
-            # Save the best model when epoch finishes
-            avg_mse, avg_ssim = self.evaluate()   
-            if avg_mse < best_mse or avg_ssim > best_ssim: 
-                # Save generator_xy model state_dict
-                checkpoint_path = os.path.join(f"{os.getcwd()}/checkpoints/cyclegan_checkpoints", f"generator_xy_checkpoint_epoch_{epoch}_run_2.pth")
-                torch.save(self.generator_xy.state_dict(), checkpoint_path)
-                print(f"Saved best model to: {checkpoint_path}")
-                best_mse = avg_mse
-                best_ssim = avg_ssim
+                    # Update the tqdm progress bar
+                    pbar.update(1)
 
             # Update learning rates
             self.generator_lr_scheduler.step()
             self.discriminator_lr_scheduler.step()
-            # New line
-            tracker.new_line()
+
+            # New line after each epoch
+            print(f"Epoch {epoch+1} finished.")
 
     def optimize_generators(self, data_x: torch.Tensor, data_y: torch.Tensor, true_labels: torch.Tensor):
         """

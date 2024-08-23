@@ -64,7 +64,7 @@ def process_dataset(input_dir, output_dir):
                 solution_data = solutions_data.get(task_id, [])
                 test_json_path = os.path.join(task_dir, 'test_input_output.json')
                 with open(test_json_path, 'w') as test_json_file:
-                    json.dump({'test': test_data, 'solution': solution_data}, test_json_file, indent=4)
+                    json.dump({'test': test_data, 'output': solution_data}, test_json_file, indent=4)
 
             # For test set, process only test data without solutions
             elif dataset_type == "test":

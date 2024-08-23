@@ -6,30 +6,42 @@ from torch.utils.data import Dataset
 import random
 from itertools import combinations
 
+import os
+import json
+import torch
+import torch.nn.functional as F
+from torch.utils.data import Dataset
+from itertools import combinations
+import random
+
 class RelationDataset(Dataset):
     def __init__(self, data_dir: str, split: str):
         if split not in ("train", "val", "test"):
             raise ValueError(f"{split} is not a valid split for the RelationDataset.")
+        
         self.data_dir = data_dir
         self.split = split
         
-        self.json_paths = [os.path.join(data_dir, json_file) for json_file in os.listdir(data_dir)]
+        # Load the appropriate JSON file based on the split
+        if split == "train":
+            json_filename = "arc-agi_training_challenges.json"
+        elif split == "val":
+            json_filename = "arc-agi_evaluation_challenges.json"
+        elif split == "test":
+            json_filename = "arc-agi_test_challenges.json"
 
         # Initialize a dictionary to store tasks and their outputs
         self.tasks = {}
 
-        # Load and process each JSON file
-        for json_path in self.json_paths:
-            with open(json_path, 'r') as f:
-                dataset = json.load(f)
+        # Load and process the selected JSON file
+        json_path = os.path.join(data_dir, json_filename)
+        with open(json_path, 'r') as f:
+            data = json.load(f)
             
-            # Extract the data based on the split
-            data = dataset.get('train', []) if split == 'train' else dataset.get('test', [])
-            
-            # Store outputs of each task
-            task_id = os.path.basename(json_path).split('.')[0]
+        # Always extract the data from the "train" key
+        for task_id, task_data in data.items():
             outputs = []
-            for item in data:
+            for item in task_data.get("train", []):  # Always get data from "train"
                 input_grid = torch.tensor(item["input"], dtype=torch.float32)
                 output_grid = torch.tensor(item["output"], dtype=torch.float32)
 
@@ -102,7 +114,7 @@ class RelationDataset(Dataset):
 
 # Example usage
 if __name__ == "__main__":
-    data_dir = "./arc-all"
+    data_dir = "./arc-prize"
     dataset = RelationDataset(data_dir, split="train")
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=32, shuffle=True)
 
@@ -112,3 +124,4 @@ if __name__ == "__main__":
         print("Output2 shape:", output2.shape)
         print("Labels:", labels)
         break
+

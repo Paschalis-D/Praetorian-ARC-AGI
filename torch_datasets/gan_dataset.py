@@ -3,40 +3,39 @@ import json
 import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
-from torchvision.transforms.functional import resize, center_crop
 
 class GanDataset(Dataset):
-    def __init__(self, data_dir: str, device: torch.device, split: str, type: str, task: int):
+    def __init__(self, data_dir: str, device: torch.device, split: str):
         self.data_dir = data_dir
         self.device = device
-        self.split = split
-        
-        # Collect all JSON files in the directory
-        self.json_paths = [os.path.join(data_dir, json_file) for json_file in os.listdir(data_dir)]
         
         # Initialize empty list to store examples
         self.examples = []
-        
-        # Load and process each JSON file
-        for json_path in self.json_paths:
-            with open(json_path, 'r') as f:
-                dataset = json.load(f)
+
+        # Load the appropriate JSON file based on the split
+        if split == "train":
+            json_filename = "arc-agi_training_challenges.json"
+        elif split == "val":
+            json_filename = "arc-agi_evaluation_challenges.json"
+        elif split == "test":
+            json_filename = "arc-agi_test_challenges.json"
+        else:
+            raise ValueError(f"Invalid split: {split}. Expected 'train', 'val', or 'test'.")
+
+        # Load the JSON data
+        with open(os.path.join(data_dir, json_filename), "r") as f:
+            data = json.load(f)
+
+        # Extract data from the "train" key for each task
+        for task_id, task_data in data.items():
+            examples = task_data.get("train", [])  # Always use the "train" key
             
-            # Extract the data based on the split
-            if split == 'train':
-                data = dataset.get('train', [])
-            elif split == 'val':
-                data = dataset.get('test', [])
-            else:
-                raise ValueError(f"Invalid split: {split}. Expected 'train' or 'val'.")
-            
-            # Add the extracted data to examples, skipping those with large dimensions
-            for item in data:
+            for item in examples:
                 input_grid = torch.tensor(item["input"], dtype=torch.float32)
                 output_grid = torch.tensor(item["output"], dtype=torch.float32)
 
-                if input_grid.shape[0] <= 32 and input_grid.shape[1] <= 32 and \
-                   output_grid.shape[0] <= 32 and output_grid.shape[1] <= 32:
+                if input_grid.shape[0] <= 32 and input_grid.shape[1] <= 30 and \
+                   output_grid.shape[0] <= 32 and output_grid.shape[1] <= 30:
                     self.examples.append(item)
                 else:
                     print(f"Skipping example with size {input_grid.shape} and {output_grid.shape}.")
@@ -83,9 +82,12 @@ class GanDataset(Dataset):
 
         return padded_tensor
 
+    
+
+
 # Example usage: Load and print the first batch of the training dataset
 if __name__ == "__main__":
-    data_dir = "D:/Praetorian-ARC-AGI/arc-all"
+    data_dir = "D:/Praetorian-ARC-AGI/arc-prize"
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     try:

@@ -11,18 +11,13 @@ from pre_train.train_relational import TrainRelational
 
 
 if __name__ == "__main__":
-    # cycleGAN training
- #   gan_trainer = TrainGAN()
+   # cycleGAN training
+   gan_trainer = TrainGAN()
+   gan_trainer.initialize()
+   gan_trainer.run()
+   gan_trainer.evaluate()
 
-    # Initialize models, dataloaders etc..
- #   gan_trainer.initialize()
-
-    # Train the GAN generators
- #   gan_trainer.run()
-
-    # Evaluate
- #   gan_trainer.evaluate()
-
- relational_trainer = TrainRelational()
- relational_trainer.initialize()
- relational_trainer.run()
+   relational_trainer = TrainRelational()
+   relational_trainer.initialize()
+   relational_trainer.run()
+   relational_trainer.evaluate()
