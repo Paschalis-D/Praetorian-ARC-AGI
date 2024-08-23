@@ -317,6 +317,12 @@ class TrainGAN:
         print(f"Average SSIM: {avg_ssim}")
 
         return avg_mse, avg_ssim
+    
+    def save(self, save_dir):
+        os.makedirs(save_dir, exist_ok=True)
+        save_path = os.path.join(save_dir, "generator_xy.pth")
+        torch.save(self.generator_xy.state_dict(), save_path)
+        print(f"Model saved to {save_path}")
 
     def calculate_ssim(self, gen_y, data_y):
         """

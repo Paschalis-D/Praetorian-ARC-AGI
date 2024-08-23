@@ -13,7 +13,7 @@ class TrainRelational:
         self.epochs = 20
         self.batch_size = 1
         self.dataloader_workers = 4
-        self.learning_rate = 0.0001
+        self.learning_rate = 0.001
         self.adam_betas = (0.5, 0.999)
         self.decay_start = 5
 
@@ -120,10 +120,8 @@ class TrainRelational:
             
         print(f"Validation loss: {running_loss / len(self.valid_dataloader)}")
 
-    def save_model(self, epoch, val_loss):
-        """
-        Save the model state_dict with the current epoch and validation loss
-        """
-        model_save_path = os.path.join(f"model_epoch_{epoch+1}_val_loss_{val_loss:.4f}.pth")
-        torch.save(self.model.state_dict(), model_save_path)
-        print(f"Model saved as {model_save_path}")
+    def save(self, save_dir):
+        os.makedirs(save_dir, exist_ok=True)
+        save_path = os.path.join(save_dir, "relational.pth")
+        torch.save(self.model.state_dict(), save_path)
+        print(f"Model saved to {save_path}")
