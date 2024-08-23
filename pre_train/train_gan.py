@@ -130,7 +130,7 @@ class TrainGAN:
 
         # Create the models
         self.generator_xy = GeneratorResNet(self.img_channels, self.n_residual_blocks).to(self.device)
-        self.generator_xy.load_state_dict(torch.load("./checkpoints/gan_checkpoint.pth", map_location= torch.device(self.device)))
+        self.generator_xy.load_state_dict(torch.load("./checkpoints/gan_checkpoint.pth", map_location= torch.device(self.device), weights_only=True))
         self.generator_yx = GeneratorResNet(self.img_channels, self.n_residual_blocks).to(self.device)
         self.discriminator_x = Discriminator(input_shape).to(self.device)
         self.discriminator_y = Discriminator(input_shape).to(self.device)
@@ -200,11 +200,6 @@ class TrainGAN:
                                                 gen_x_buffer.push_and_pop(gen_x), gen_y_buffer.push_and_pop(gen_y),
                                                 true_labels, false_labels)
 
-                    # Save images at intervals
-                    batches_done = epoch * len(self.dataloader) + i
-                    if batches_done % self.sample_interval == 0:
-                        # Sample images
-                        self.sample_images(batches_done)
 
                     # Update the tqdm progress bar
                     pbar.update(1)
@@ -258,12 +253,6 @@ class TrainGAN:
         self.generator_optimizer.zero_grad()
         loss_generator.backward()
         self.generator_optimizer.step()
-
-        # Log losses
-        tracker.add({'loss.generator': loss_generator,
-                     'loss.generator.cycle': loss_cycle,
-                     'loss.generator.gan': loss_gan,
-                     'loss.generator.identity': loss_identity})
 
         # Return generated images
         return gen_x, gen_y

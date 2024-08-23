@@ -47,7 +47,7 @@ class TrainRelational:
         print("Initializing trining...")
         # Create the models
         self.model = RelationNetwork().to(self.device)
-        self.model.load_state_dict(torch.load("./checkpoints/relational_checkpoint.pth", map_location=torch.device(self.device)))
+        self.model.load_state_dict(torch.load("./checkpoints/relational_checkpoint.pth", map_location=torch.device(self.device), weights_only=True))
         print("Model loaded.")
         # Create the optmizers
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.learning_rate, betas=self.adam_betas)
@@ -71,8 +71,8 @@ class TrainRelational:
         print(f"Dataloaders were set with {self.batch_size} batch size and {self.dataloader_workers} workers.")
 
     def run(self):
+        print("Training Relational Netwrok on arc-agi data.")
         for epoch in range(self.epochs):
-            print("Training Relational Netwrok on arc-agi data.")
             self.model.train()
             running_loss = 0.0
 
@@ -100,11 +100,6 @@ class TrainRelational:
                 # Update tqdm with current loss
                 train_loader.set_postfix({"loss": running_loss / (i + 1)})
 
-            # Save model if the validation loss decreases
-            if running_loss < self.best_val_loss:
-                self.best_val_loss = running_loss
-                self.save_model(epoch, running_loss)
-
         print("Training complete.")
 
     def evaluate(self):
@@ -120,8 +115,9 @@ class TrainRelational:
                 output1, output2, label = output1.to(self.device), output2.to(self.device), label.to(self.device)
 
                 relation = self.model(output1, output2)
-                running_loss += self.loss(relation, label)
-        
+                loss = self.loss(relation, label)
+                running_loss += loss.item()  # Use .item() to accumulate the scalar loss
+            
         print(f"Validation loss: {running_loss / len(self.valid_dataloader)}")
 
     def save_model(self, epoch, val_loss):

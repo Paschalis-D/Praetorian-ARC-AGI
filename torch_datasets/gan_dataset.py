@@ -34,8 +34,8 @@ class GanDataset(Dataset):
                 input_grid = torch.tensor(item["input"], dtype=torch.float32)
                 output_grid = torch.tensor(item["output"], dtype=torch.float32)
 
-                if input_grid.shape[0] <= 32 and input_grid.shape[1] <= 30 and \
-                   output_grid.shape[0] <= 32 and output_grid.shape[1] <= 30:
+                if input_grid.shape[0] <= 32 and input_grid.shape[1] <= 32 and \
+                   output_grid.shape[0] <= 32 and output_grid.shape[1] <= 32:
                     self.examples.append(item)
                 else:
                     print(f"Skipping example with size {input_grid.shape} and {output_grid.shape}.")
