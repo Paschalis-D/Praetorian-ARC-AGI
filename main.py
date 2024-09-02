@@ -12,6 +12,7 @@ from pre_train.train_refinement import TrainRefinement
 
 
 if __name__ == "__main__":
+
    MODELS_DIR = "./trained_models"
    # cycleGAN training
    gan_trainer = TrainGAN()
@@ -27,7 +28,4 @@ if __name__ == "__main__":
    relational_trainer.save(MODELS_DIR)
 
    refinement_trainer = TrainRefinement()
-   refinement_trainer.initialize()
    refinement_trainer.run()
-   refinement_trainer.evaluate()
-   refinement_trainer.save(MODELS_DIR)
