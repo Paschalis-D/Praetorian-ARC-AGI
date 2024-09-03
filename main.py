@@ -15,17 +15,17 @@ if __name__ == "__main__":
 
    MODELS_DIR = "./trained_models"
    # cycleGAN training
-   gan_trainer = TrainGAN()
-   gan_trainer.initialize()
-   gan_trainer.run()
-   gan_trainer.evaluate()
-   gan_trainer.save(MODELS_DIR)
+   #gan_trainer = TrainGAN()
+   #gan_trainer.initialize()
+   #gan_trainer.run()
+   #gan_trainer.evaluate()
+   #gan_trainer.save(MODELS_DIR)
 
-   relational_trainer = TrainRelational()
-   relational_trainer.initialize()
-   relational_trainer.run()
-   relational_trainer.evaluate()
-   relational_trainer.save(MODELS_DIR)
+   #relational_trainer = TrainRelational()
+   #relational_trainer.initialize()
+   #relational_trainer.run()
+   #relational_trainer.evaluate()
+   #relational_trainer.save(MODELS_DIR)
 
    refinement_trainer = TrainRefinement()
    refinement_trainer.run()

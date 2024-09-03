@@ -5,44 +5,83 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 
 class RefinementDataset(Dataset):
-    def __init__(self, data_dir: str, device: torch.device):
+    def __init__(self, data_dir: str, device: torch.device, split: str):
         self.data_dir = data_dir
         self.device = device
         
-        # Initialize empty lists to store examples and task IDs
+        # Initialize empty lists to store examples, labels, task IDs, and task-specific outputs
         self.examples = []
+        self.labels = []
         self.task_ids = []
         self.task_examples = []
 
         # Load the JSON data for challenges
-        json_filename = "arc-agi_test_challenges.json"
+        if split == "train":
+            json_filename = "arc-agi_training_challenges.json"
+            solution_filename = "arc-agi_training_solutions.json"
+        elif split == "test":
+            json_filename = "arc-agi_test_challenges.json"
+            solution_filename = None  # No solutions for test split
+        else:
+            raise ValueError(f"Invalid split: {split}. Expected 'train' or 'test'.")
+
+        # Load the challenge data
         with open(os.path.join(data_dir, json_filename), "r") as f:
             data = json.load(f)
 
-        # Extract data from the "test" key for each task
+        # Load the solutions data for training split
+        solutions_data = {}
+        if solution_filename:
+            with open(os.path.join(data_dir, solution_filename), "r") as f:
+                solutions_data = json.load(f)
+
+        # Process each task
         for task_id, task_data in data.items():
-            examples = task_data.get("test", [])  # Use the "test" key
+            # For the test split, only consider the test pairs
+            examples = task_data.get("test", [])  # Test pairs (single pair in test)
             
-            for item in examples:
-                input_grid = torch.tensor(item["input"], dtype=torch.float32)
+            # For the training split, consider both train (multiple pairs) and test (single pair) inputs
+            if split == "train":
+                for item in examples:
+                    input_grid = torch.tensor(item["input"], dtype=torch.float32)
+                    if task_id in solutions_data:
+                        output_grid = torch.tensor(solutions_data[task_id][0], dtype=torch.float32)
 
-                if input_grid.shape[0] <= 32 and input_grid.shape[1] <= 32:
-                    self.examples.append(item)
-                    self.task_ids.append(task_id)  # Store task ID
+                        if input_grid.shape[0] <= 32 and input_grid.shape[1] <= 32 and \
+                           output_grid.shape[0] <= 32 and output_grid.shape[1] <= 32:
+                            self.examples.append(input_grid)
+                            self.labels.append(output_grid)
+                            self.task_ids.append(task_id)
 
-                    # Add all outputs for this task from the "train" key as task examples
-                    task_train_examples = task_data.get("train", [])
-                    task_outputs = [torch.tensor(example["output"], dtype=torch.float32) for example in task_train_examples]
-                    self.task_examples.append(task_outputs)
-                else:
-                    print(f"Skipping example with size {input_grid.shape}.")
+                            # Add all outputs for this task from the "train" key as task examples
+                            task_train_examples = task_data.get("train", [])
+                            task_outputs = [torch.tensor(example["output"], dtype=torch.float32) for example in task_train_examples]
+                            self.task_examples.append(task_outputs)
+                        else:
+                            print(f"Skipping example with size {input_grid.shape} or {output_grid.shape}.")
+                    else:
+                        print(f"Missing solution for task_id {task_id}. Skipping.")
 
+            elif split == "test":
+                for item in examples:
+                    input_grid = torch.tensor(item["input"], dtype=torch.float32)
+                    if input_grid.shape[0] <= 32 and input_grid.shape[1] <= 32:
+                        self.examples.append(input_grid)
+                        self.task_ids.append(task_id)
+
+                        # Add all outputs for this task from the "train" key as task examples
+                        task_train_examples = task_data.get("train", [])
+                        task_outputs = [torch.tensor(example["output"], dtype=torch.float32) for example in task_train_examples]
+                        self.task_examples.append(task_outputs)
+                    else:
+                        print(f"Skipping example with size {input_grid.shape}.")
+    
     def __len__(self):
         return len(self.examples)
 
     def __getitem__(self, idx):
         try:
-            input_grid = torch.tensor(self.examples[idx]["input"], dtype=torch.float32).unsqueeze(0)
+            input_grid = self.examples[idx].clone().detach().unsqueeze(0)
 
             # Normalize the pixel values
             input_grid = input_grid / 9.0
@@ -53,16 +92,17 @@ class RefinementDataset(Dataset):
             # Task-specific outputs for relational network
             task_outputs = [self.pad(output.unsqueeze(0) / 9.0, 32) for output in self.task_examples[idx]]
 
-            # Move tensors to the specified device
-            input_grid = input_grid.to(self.device)
-            task_outputs = [output.to(self.device) for output in task_outputs]
-
-            return {"x": input_grid, "task_outputs": task_outputs, "task_id": self.task_ids[idx]}  # Single task ID
+            # If it's a training split, return the corresponding label (y)
+            if hasattr(self, 'labels') and self.labels:
+                output_grid = self.pad(self.labels[idx].clone().detach().unsqueeze(0) / 9.0, 32)
+                output_grid = output_grid
+                return {"x": input_grid, "y": output_grid, "task_outputs": task_outputs, "task_id": self.task_ids[idx]}
+            else:
+                return {"x": input_grid, "task_outputs": task_outputs, "task_id": self.task_ids[idx]}  # Single task ID
 
         except Exception as e:
             print(f"An error occurred while processing index {idx}: {e}")
             raise
-
 
     def pad(self, tensor, size):
         current_height = tensor.size(1)
@@ -76,6 +116,8 @@ class RefinementDataset(Dataset):
         padded_tensor = F.pad(tensor, padding, mode='constant', value=-1)
 
         return padded_tensor
+
+
 
 
 # Example usage: Load and print the first batch of the training dataset
